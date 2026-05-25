@@ -1,0 +1,8 @@
+{
+  "ai": null,
+  "integration": "codex",
+  "integration_options": "--skills",
+  "script": "ps",
+  "no_git": true,
+  "context_file": "AGENTS.md"
+}

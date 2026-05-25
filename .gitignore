@@ -1,0 +1,14 @@
+data/
+analytics-output/
+*.log
+server.err
+config.json
+node_modules/
+npm-global/
+tools/node/
+tools/node-win-x64.zip
+tools/spec-kit-src/
+tools/uv/
+tools/uv-cache/
+tools/uv-python/
+tools/uv-tools/

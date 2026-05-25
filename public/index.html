@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сбор системной аналитики</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">CLI analytics workspace</p>
+        <h1>Сбор системной аналитики</h1>
+      </div>
+      <div class="status-pill" id="configStatus">Загрузка конфигурации</div>
+    </header>
+
+    <div class="overview-grid">
+    <section class="section band cli-config-card">
+      <div class="section-head">
+        <div>
+          <h2>CLI соединение</h2>
+          <p>Выбранный CLI задается в config.json, чтобы запуск был воспроизводимым.</p>
+        </div>
+      </div>
+      <div class="cli-facts">
+        <div class="cli-fact">
+          <span>Активный CLI</span>
+          <strong id="activeCliName">...</strong>
+        </div>
+        <div class="cli-fact wide">
+          <span>Команда</span>
+          <code id="activeCliCommand">...</code>
+        </div>
+      </div>
+      <div class="config-note" id="cliConfigHint">Выбор меняется в config.json: cli.active.</div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>SDD профиль результата</h2>
+          <p>Выберите формат артефактов для дальнейшей работы со Spec-Driven Development.</p>
+        </div>
+      </div>
+      <div class="select-grid">
+        <label>
+          <span>Формат результата</span>
+          <select id="outputProfile">
+            <option value="markdown">Markdown аналитика</option>
+            <option value="openspec">OpenSpec</option>
+            <option value="speckit">Spec Kit</option>
+            <option value="hybrid">Hybrid: OpenSpec + Spec Kit</option>
+          </select>
+        </label>
+        <div class="capability-panel" id="sddCapabilities">Проверяю доступность SDD skills...</div>
+      </div>
+    </section>
+    </div>
+
+    <div class="workspace-grid">
+      <div class="primary-column">
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Пути к репозиториям</h2>
+          <p>Добавьте исходный код, автотесты или готовую системную аналитику.</p>
+        </div>
+        <button class="round-btn" id="addRepo" type="button" title="Добавить репозиторий">+</button>
+      </div>
+      <div class="repo-list" id="repoList"></div>
+    </section>
+
+    <section class="section band">
+      <div class="section-head">
+        <div>
+          <h2>Файлы системной аналитики</h2>
+          <p>Можно загрузить несколько файлов с произвольным расширением.</p>
+        </div>
+        <label class="button file-button">
+          Добавить файлы
+          <input id="analysisFiles" type="file" multiple>
+        </label>
+      </div>
+      <div class="file-list" id="fileList"></div>
+    </section>
+
+    <section class="section band">
+      <div class="section-head">
+        <div>
+          <h2>Описание задачи</h2>
+          <p>Свободное описание можно растягивать за нижний правый угол поля.</p>
+        </div>
+      </div>
+      <textarea id="taskDescription" class="task-textarea" rows="7" placeholder="Опишите бизнес-задачу, контекст, ограничения, ожидания к аналитике..."></textarea>
+    </section>
+
+    <section class="section action-row">
+      <button id="createAnalytics" class="button primary big" type="button" disabled>Создать аналитику</button>
+      <button id="stopJob" class="button danger hidden" type="button">Остановить</button>
+      <div class="action-status" id="actionStatus">Добавьте хотя бы один источник данных.</div>
+    </section>
+      </div>
+
+      <aside class="support-column">
+    <section class="section two-columns">
+      <div class="integration-panel">
+        <div class="section-head compact">
+          <div>
+            <h2>Jira</h2>
+            <p id="jiraHint">URL берется из config.json.</p>
+          </div>
+          <button class="button subtle" id="authJira" type="button">Аутентифицироваться</button>
+        </div>
+        <div class="auth-line" id="jiraAuth">Не проверено</div>
+        <div class="list-head">
+          <span>Ссылки на задачи</span>
+          <button class="round-btn small" id="addJira" type="button" title="Добавить Jira ссылку">+</button>
+        </div>
+        <div class="link-list" id="jiraList"></div>
+      </div>
+
+      <div class="integration-panel">
+        <div class="section-head compact">
+          <div>
+            <h2>Confluence</h2>
+            <p id="confluenceHint">URL берется из config.json.</p>
+          </div>
+          <button class="button subtle" id="authConfluence" type="button">Аутентифицироваться</button>
+        </div>
+        <div class="auth-line" id="confluenceAuth">Не проверено</div>
+        <div class="list-head">
+          <span>Ссылки на страницы</span>
+          <button class="round-btn small" id="addConfluence" type="button" title="Добавить Confluence ссылку">+</button>
+        </div>
+        <div class="link-list" id="confluenceList"></div>
+      </div>
+    </section>
+
+    <section class="section cli-section">
+      <div class="section-head">
+        <div>
+          <h2>Взаимодействие с CLI</h2>
+          <p>Вывод выбранного CLI, ответы на уточнения и разрешения.</p>
+        </div>
+      </div>
+      <textarea id="cliOutput" class="cli-output" readonly spellcheck="false" rows="16"></textarea>
+      <div class="cli-input-row">
+        <textarea id="cliInput" class="cli-input" rows="2" placeholder="Введите ответ или разрешение для CLI..."></textarea>
+        <button id="sendCliInput" class="button" type="button" disabled>Отправить</button>
+      </div>
+      <div class="cli-help" id="cliInputHelp">
+        Кнопка станет активна после запуска обработки, когда выбранный CLI будет готов принимать уточнения или разрешения.
+      </div>
+    </section>
+      </aside>
+    </div>
+  </main>
+
+  <template id="repoRowTemplate">
+    <div class="repo-row">
+      <div class="path-field">
+        <input class="repo-path" type="text" placeholder="Путь к репозиторию">
+        <input class="repo-directory-picker" type="file" webkitdirectory directory multiple>
+        <button class="icon-btn pick-path" type="button" title="Выбрать путь через файловый менеджер">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h6.5A2.5 2.5 0 0 1 21 8.5v8A3.5 3.5 0 0 1 17.5 20h-11A3.5 3.5 0 0 1 3 16.5v-10Zm2 3v7A1.5 1.5 0 0 0 6.5 18h11a1.5 1.5 0 0 0 1.5-1.5v-7H5Z"/></svg>
+        </button>
+      </div>
+      <input class="repo-description" type="text" placeholder="Описание сути репозитория">
+      <select class="repo-kind">
+        <option>исходный код</option>
+        <option>автотесты</option>
+        <option>системная аналитика</option>
+      </select>
+      <button class="icon-btn delete-row" type="button" title="Удалить строку">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.7 11H7.7L7 9Zm3 2 .2 7h1.8l-.1-7H10Zm4 0-.1 7h1.8l.3-7h-2Z"/></svg>
+      </button>
+    </div>
+  </template>
+
+  <template id="linkRowTemplate">
+    <div class="link-row">
+      <input class="link-input" type="url" placeholder="https://...">
+      <button class="icon-btn delete-row" type="button" title="Удалить ссылку">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.7 11H7.7L7 9Zm3 2 .2 7h1.8l-.1-7H10Zm4 0-.1 7h1.8l.3-7h-2Z"/></svg>
+      </button>
+    </div>
+  </template>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
