@@ -26,10 +26,10 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   bindEvents();
+  await loadConfig();
   addRepoRow();
   addLinkRow(jiraList);
   addLinkRow(confluenceList);
-  await loadConfig();
   await loadUploads();
   refreshCreateState();
 }
@@ -51,7 +51,8 @@ function bindEvents() {
 async function loadConfig() {
   try {
     state.config = await apiGet("/api/config");
-    document.querySelector("#configStatus").textContent = `CLI: ${state.config.cli?.active || "codex"} · Результаты: ${state.config.outputDirectory}`;
+    const repositoryMode = getRepositoryMode();
+    document.querySelector("#configStatus").textContent = `CLI: ${state.config.cli?.active || "codex"} · Режим: ${repositoryMode} · Результаты: ${state.config.outputDirectory}`;
     document.querySelector("#jiraHint").textContent = state.config.integrations.jira.configured
       ? state.config.integrations.jira.baseUrl
       : "URL Jira не задан в config.json";
@@ -114,7 +115,14 @@ async function loadUploads() {
 function addRepoRow(value = {}) {
   const template = document.querySelector("#repoRowTemplate");
   const row = template.content.firstElementChild.cloneNode(true);
+  configureRepositoryRowMode(row);
   row.querySelector(".repo-path").value = value.path || "";
+  row.querySelector(".repo-url").value = value.url || "";
+  row.querySelector(".repo-branch").value = value.branch || "";
+  row.querySelector(".repo-auth-type").value = value.authType || "none";
+  row.querySelector(".repo-username").value = value.username || "";
+  row.querySelector(".repo-password").value = value.password || "";
+  row.querySelector(".repo-ssh-key").value = value.sshKey || "";
   row.querySelector(".repo-description").value = value.description || "";
   row.querySelector(".repo-kind").value = value.kind || "исходный код";
   row.querySelector(".delete-row").addEventListener("click", () => {
@@ -122,52 +130,51 @@ function addRepoRow(value = {}) {
     refreshCreateState();
   });
   row.querySelector(".pick-path").addEventListener("click", () => {
-    row.querySelector(".repo-directory-picker").click();
+    pickLocalRepositoryPath(row);
   });
-  row.querySelector(".repo-directory-picker").addEventListener("change", async (event) => {
-    await uploadRepositoryFolder(row, event.target);
+  row.querySelector(".repo-auth-type").addEventListener("change", () => {
+    updateRepositoryAuthFields(row);
   });
   row.querySelectorAll("input, select").forEach((input) => {
     input.addEventListener("input", refreshCreateState);
     input.addEventListener("change", refreshCreateState);
   });
+  row.querySelector(".repo-ssh-key").addEventListener("input", refreshCreateState);
   repoList.appendChild(row);
+  updateRepositoryAuthFields(row);
   refreshCreateState();
 }
 
-async function uploadRepositoryFolder(row, picker) {
-  const files = [...picker.files];
-  if (!files.length) {
-    return;
-  }
+function configureRepositoryRowMode(row) {
+  const mode = getRepositoryMode();
+  row.classList.toggle("global", mode === "global");
+  row.classList.toggle("local", mode !== "global");
+}
 
+function getRepositoryMode() {
+  return state.config?.service?.mode === "global" ? "global" : "local";
+}
+
+function updateRepositoryAuthFields(row) {
+  const authType = row.querySelector(".repo-auth-type").value;
+  row.querySelector(".repo-basic-auth").classList.toggle("hidden", authType !== "basic");
+  row.querySelector(".repo-ssh-auth").classList.toggle("hidden", authType !== "ssh");
+}
+
+async function pickLocalRepositoryPath(row) {
   const button = row.querySelector(".pick-path");
   button.disabled = true;
-  appendCliOutput(`\n[web] Загружаю выбранную папку репозитория: ${files.length} файл(ов).\n`);
+  appendCliOutput("\n[web] Открываю выбор локального пути к репозиторию.\n");
 
   try {
-    const formData = new FormData();
-    files.forEach((file) => {
-      formData.append("files", file, file.webkitRelativePath || file.name);
-    });
-
-    const response = await fetch("/api/repository-folders", {
-      method: "POST",
-      body: formData
-    });
-    const body = await response.json();
-    if (!response.ok) {
-      throw new Error(body.error || "Не удалось загрузить папку репозитория.");
-    }
-
+    const body = await apiPost("/api/pick-directory", {});
     row.querySelector(".repo-path").value = body.path || "";
-    appendCliOutput(`[web] Репозиторий сохранен локально: ${body.path || ""} (${body.fileCount || 0} файл(ов), ${formatBytes(body.size || 0)})\n`);
+    appendCliOutput(`[web] Выбран локальный путь: ${body.path || ""}\n`);
     refreshCreateState();
   } catch (error) {
     appendCliOutput(`\n[web] ${error.message}\n`);
   } finally {
     button.disabled = false;
-    picker.value = "";
   }
 }
 
@@ -250,9 +257,31 @@ async function deleteUpload(id) {
 
 async function authenticate(service) {
   const button = document.querySelector(service === "jira" ? "#authJira" : "#authConfluence");
+  const integration = state.config?.integrations?.[service] || {};
+  const isBrowserAuth = integration.authMode === "browser";
   button.disabled = true;
-  renderAuthState(service, { ok: false, message: "Проверяем сертификат..." });
+  renderAuthState(service, {
+    ok: false,
+    status: "pending",
+    message: isBrowserAuth ? "Открываю страницу аутентификации..." : "Проверяем сертификат..."
+  });
   try {
+    if (isBrowserAuth) {
+      if (!integration.browserAuthUrl) {
+        throw new Error(`URL браузерной аутентификации для ${service} не задан в config.json.`);
+      }
+
+      const authWindow = window.open(integration.browserAuthUrl, "_blank");
+      if (!authWindow) {
+        throw new Error("Браузер заблокировал всплывающее окно. Разрешите всплывающие окна для этого приложения и повторите попытку.");
+      }
+      try {
+        authWindow.opener = null;
+      } catch {
+        // Some browsers protect this property after cross-origin navigation.
+      }
+    }
+
     const state = await apiPost(`/api/auth/${service}`, {});
     renderAuthState(service, state);
   } catch (error) {
@@ -264,16 +293,23 @@ async function authenticate(service) {
 
 function renderAuthState(service, value) {
   const element = document.querySelector(service === "jira" ? "#jiraAuth" : "#confluenceAuth");
-  const prefix = value?.ok ? "Готово" : "Статус";
+  const prefix = value?.ok ? "Готово" : value?.status === "opened" ? "Открыто" : "Статус";
   element.textContent = `${prefix}: ${value?.message || "Не проверено"}`;
-  element.style.color = value?.ok ? "#0d5f2a" : "#5f7c68";
+  element.style.color = value?.ok ? "#0d5f2a" : value?.status === "opened" ? "#0b5f7a" : "#5f7c68";
 }
 
 function gatherPayload() {
   return {
     outputProfile: outputProfileSelect.value || "markdown",
     repositories: [...repoList.querySelectorAll(".repo-row")].map((row) => ({
+      mode: getRepositoryMode(),
       path: row.querySelector(".repo-path").value.trim(),
+      url: row.querySelector(".repo-url").value.trim(),
+      branch: row.querySelector(".repo-branch").value.trim(),
+      authType: row.querySelector(".repo-auth-type").value,
+      username: row.querySelector(".repo-username").value.trim(),
+      password: row.querySelector(".repo-password").value,
+      sshKey: row.querySelector(".repo-ssh-key").value,
       description: row.querySelector(".repo-description").value.trim(),
       kind: row.querySelector(".repo-kind").value
     })),
@@ -292,7 +328,7 @@ function gatherLinks(container) {
 
 function refreshCreateState() {
   const payload = gatherPayload();
-  const hasRepos = payload.repositories.some((repo) => repo.path || repo.description);
+  const hasRepos = payload.repositories.some((repo) => repo.path || repo.url || repo.description);
   const hasData = hasRepos
     || payload.files.length
     || payload.jiraLinks.length

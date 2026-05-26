@@ -4,6 +4,12 @@
   "outputDirectory": "analytics-output",
   "maxRequestBytes": 104857600,
   "maxInlineFileBytes": 262144,
+  "service": {
+    "mode": "local",
+    "repositoryCheckoutDirectory": "data/repositories",
+    "defaultBranch": "main",
+    "directoryPickerTimeoutMs": 120000
+  },
   "sdd": {
     "defaultProfile": "openspec",
     "profiles": [
@@ -45,6 +51,8 @@
     "jira": {
       "baseUrl": "https://jira.example.local",
       "restApiVersion": "2",
+      "authMode": "browser",
+      "browserAuthUrl": "",
       "authCheckPath": "/rest/api/2/myself",
       "issueFields": [
         "summary",
@@ -67,6 +75,8 @@
     "confluence": {
       "baseUrl": "https://confluence.example.local",
       "restBasePath": "/rest/api",
+      "authMode": "browser",
+      "browserAuthUrl": "",
       "authCheckPath": "/rest/api/user/current",
       "certificate": {
         "pfxPath": "",

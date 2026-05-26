@@ -314,13 +314,24 @@ p {
   display: grid;
   grid-template-columns: minmax(220px, 1.4fr) minmax(220px, 1fr) 190px 42px;
   gap: 10px;
-  align-items: center;
+  align-items: start;
 }
 
 .path-field,
 .link-row {
   display: flex;
   gap: 8px;
+}
+
+.repo-global-fields,
+.repo-auth-details {
+  display: grid;
+  gap: 8px;
+}
+
+.repo-row.local .repo-global-fields,
+.repo-row.global .repo-local-fields {
+  display: none;
 }
 
 input,
@@ -363,10 +374,6 @@ select:focus {
   inset: 0;
   opacity: 0;
   cursor: pointer;
-}
-
-.repo-directory-picker {
-  display: none;
 }
 
 .file-list:empty::before,
@@ -528,6 +535,10 @@ select:focus {
 
   .repo-row {
     grid-template-columns: minmax(260px, 1.45fr) minmax(220px, 1fr) 180px 42px;
+  }
+
+  .repo-row.global {
+    grid-template-columns: minmax(320px, 1.6fr) minmax(220px, 0.9fr) 180px 42px;
   }
 }
 
