@@ -230,6 +230,10 @@ function getPublicConfig() {
     host: config.host,
     port: config.port,
     outputDirectory: resolveAppPath(config.outputDirectory || "analytics-output"),
+    service: {
+      mode: getRepositoryMode(),
+      defaultBranch: getDefaultRepositoryBranch()
+    },
     sdd: {
       defaultProfile: normalizeSddProfile(config.sdd?.defaultProfile),
       profiles: getSddProfiles(),
@@ -245,13 +249,17 @@ function getPublicConfig() {
     },
     integrations: {
       jira: {
-        configured: Boolean(config.integrations?.jira?.baseUrl),
+        configured: Boolean(config.integrations?.jira?.baseUrl || getBrowserAuthUrl(config.integrations?.jira)),
         baseUrl: config.integrations?.jira?.baseUrl || "",
+        authMode: getIntegrationAuthMode("jira", config.integrations?.jira),
+        browserAuthUrl: getBrowserAuthUrl(config.integrations?.jira),
         auth: authState.jira
       },
       confluence: {
-        configured: Boolean(config.integrations?.confluence?.baseUrl),
+        configured: Boolean(config.integrations?.confluence?.baseUrl || getBrowserAuthUrl(config.integrations?.confluence)),
         baseUrl: config.integrations?.confluence?.baseUrl || "",
+        authMode: getIntegrationAuthMode("confluence", config.integrations?.confluence),
+        browserAuthUrl: getBrowserAuthUrl(config.integrations?.confluence),
         auth: authState.confluence
       }
     }
@@ -338,9 +346,21 @@ function commandFileExists(commandName) {
   });
 }
 
+function getRepositoryMode() {
+  return compact(config.service?.mode).toLowerCase() === "global" ? "global" : "local";
+}
+
+function getDefaultRepositoryBranch() {
+  return compact(config.service?.defaultBranch) || "main";
+}
+
+function getRepositoryCheckoutRoot() {
+  return resolveAppPath(config.service?.repositoryCheckoutDirectory || "data/repositories");
+}
+
 function hasAnyInput(payload) {
   const repos = Array.isArray(payload.repositories) && payload.repositories.some((repo) => {
-    return compact(repo.path) || compact(repo.description);
+    return compact(repo.path) || compact(repo.url) || compact(repo.description);
   });
   const files = Array.isArray(payload.files) && payload.files.length > 0;
   const jira = Array.isArray(payload.jiraLinks) && payload.jiraLinks.some(compact);
@@ -701,7 +721,7 @@ async function commandExists(command) {
 }
 
 async function runPicker(command, args) {
-  const result = await runProcess(command, args, { timeoutMs: 10 * 60 * 1000 });
+  const result = await runProcess(command, args, { timeoutMs: Number(config.service?.directoryPickerTimeoutMs || 2 * 60 * 1000) });
   const selectedPath = result.stdout.trim();
   if (!selectedPath) {
     const error = new Error("Выбор пути отменен.");
@@ -714,8 +734,10 @@ async function runPicker(command, args) {
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      windowsHide: false,
-      shell: false
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
+      windowsHide: options.windowsHide === undefined ? false : Boolean(options.windowsHide),
+      shell: options.shell === undefined ? false : Boolean(options.shell)
     });
     let stdout = "";
     let stderr = "";
@@ -750,6 +772,30 @@ function runProcess(command, args, options = {}) {
 
 async function authenticate(service) {
   const integration = config.integrations?.[service];
+  const browserAuthUrl = getBrowserAuthUrl(integration);
+  const authMode = getIntegrationAuthMode(service, integration);
+
+  if (authMode === "browser") {
+    if (!browserAuthUrl) {
+      const state = {
+        ok: false,
+        checkedAt: new Date().toISOString(),
+        message: `URL браузерной аутентификации для ${service} не задан в config.json.`
+      };
+      authState[service] = state;
+      return state;
+    }
+
+    const state = {
+      ok: false,
+      status: "opened",
+      checkedAt: new Date().toISOString(),
+      message: "Окно аутентификации открыто. Выберите сертификат в системном диалоге и завершите вход в браузере."
+    };
+    authState[service] = state;
+    return state;
+  }
+
   if (!integration?.baseUrl) {
     const state = {
       ok: false,
@@ -785,6 +831,21 @@ async function authenticate(service) {
   }
 }
 
+function getIntegrationAuthMode(service, integration) {
+  const configuredMode = compact(integration?.authMode).toLowerCase();
+  if (configuredMode) {
+    return configuredMode;
+  }
+  if (service === "jira" && getBrowserAuthUrl(integration)) {
+    return "browser";
+  }
+  return "certificate";
+}
+
+function getBrowserAuthUrl(integration) {
+  return compact(integration?.browserAuthUrl || integration?.authUrl);
+}
+
 async function runJob(job, payload) {
   job.status = "running";
   emitJob(job, "status", { status: "running", message: "Обработка запущена." });
@@ -796,11 +857,12 @@ async function runJob(job, payload) {
   await fsp.mkdir(outputDir, { recursive: true });
 
   const stepResults = [];
-  const repositories = normalizeRepositories(payload.repositories);
+  let repositories = normalizeRepositories(payload.repositories);
   const jiraLinks = normalizeStringList(payload.jiraLinks);
   const confluenceLinks = normalizeStringList(payload.confluenceLinks);
   const fileIds = normalizeStringList(payload.files);
   const taskDescription = compact(payload.taskDescription);
+  repositories = await prepareRepositoriesForJob(job, repositories);
 
   emitJob(job, "log", {
     message: `CLI: ${cliName}. SDD-профиль: ${outputProfile}. Каталог результата: ${outputDir}`
@@ -1090,13 +1152,193 @@ function normalizeRepositories(repositories) {
     return [];
   }
 
+  const mode = getRepositoryMode();
   return repositories
     .map((repo) => ({
+      mode,
       path: compact(repo.path),
+      url: compact(repo.url),
+      branch: compact(repo.branch) || getDefaultRepositoryBranch(),
+      authType: normalizeRepositoryAuthType(repo.authType),
+      username: compact(repo.username),
+      password: typeof repo.password === "string" ? repo.password : "",
+      sshKey: typeof repo.sshKey === "string" ? repo.sshKey : "",
       description: compact(repo.description),
       kind: compact(repo.kind) || "исходный код"
     }))
-    .filter((repo) => repo.path || repo.description);
+    .filter((repo) => repo.path || repo.url || repo.description);
+}
+
+function normalizeRepositoryAuthType(value) {
+  const authType = compact(value).toLowerCase();
+  return ["basic", "ssh"].includes(authType) ? authType : "none";
+}
+
+async function prepareRepositoriesForJob(job, repositories) {
+  if (!repositories.length) {
+    return repositories;
+  }
+
+  if (getRepositoryMode() !== "global") {
+    return Promise.all(repositories.map((repo) => prepareLocalRepository(repo)));
+  }
+
+  const checkoutRoot = path.join(getRepositoryCheckoutRoot(), job.id);
+  await fsp.mkdir(checkoutRoot, { recursive: true });
+  const prepared = [];
+
+  for (let index = 0; index < repositories.length; index += 1) {
+    const repo = repositories[index];
+    if (!repo.url) {
+      prepared.push(stripRepositorySecrets(repo));
+      continue;
+    }
+
+    const targetPath = path.join(checkoutRoot, `${index + 1}-${getRepositoryFolderName(repo, index)}`);
+    emitJob(job, "log", { message: `Клонирую репозиторий ${repo.url}, ветка ${repo.branch || getDefaultRepositoryBranch()}.` });
+    await cloneRepository(repo, targetPath);
+    prepared.push(stripRepositorySecrets({
+      ...repo,
+      path: targetPath,
+      localPath: targetPath,
+      sourceUrl: repo.url
+    }));
+  }
+
+  return prepared;
+}
+
+async function prepareLocalRepository(repo) {
+  if (!repo.path) {
+    return stripRepositorySecrets(repo);
+  }
+
+  const resolvedPath = resolveAppPath(repo.path);
+  const stat = await fsp.stat(resolvedPath).catch(() => null);
+  if (!stat || !stat.isDirectory()) {
+    const error = new Error(`Локальный путь к репозиторию не найден или не является папкой: ${repo.path}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return stripRepositorySecrets({
+    ...repo,
+    path: resolvedPath,
+    localPath: resolvedPath
+  });
+}
+
+function stripRepositorySecrets(repo) {
+  const { password, sshKey, ...safeRepo } = repo;
+  return safeRepo;
+}
+
+function getRepositoryFolderName(repo, index) {
+  const fromUrl = getRepositoryNameFromUrl(repo.url);
+  return sanitizePathSegment(fromUrl || `repository-${index + 1}`);
+}
+
+function getRepositoryNameFromUrl(value) {
+  try {
+    const parsed = new URL(value);
+    const lastSegment = parsed.pathname.split("/").filter(Boolean).pop() || "";
+    return lastSegment.replace(/\.git$/i, "");
+  } catch {
+    const normalized = String(value || "").replace(/\\/g, "/");
+    const lastSegment = normalized.split("/").filter(Boolean).pop() || "";
+    return lastSegment.replace(/\.git$/i, "");
+  }
+}
+
+async function cloneRepository(repo, targetPath) {
+  const branch = repo.branch || getDefaultRepositoryBranch();
+  const auth = await createGitAuthOptions(repo);
+  const secrets = [repo.password, repo.sshKey].filter(Boolean);
+  try {
+    await runProcess("git", ["clone", "--depth", "1", "--branch", branch, repo.url, targetPath], {
+      timeoutMs: Number(config.service?.repositoryCloneTimeoutMs || 10 * 60 * 1000),
+      env: {
+        ...auth.env,
+        GIT_TERMINAL_PROMPT: "0"
+      },
+      windowsHide: true
+    });
+  } catch (error) {
+    throw new Error(maskSensitiveText(`Не удалось скачать репозиторий ${repo.url}: ${error.message}`, secrets));
+  } finally {
+    await auth.cleanup();
+  }
+}
+
+async function createGitAuthOptions(repo) {
+  if (repo.authType === "ssh") {
+    return createSshGitAuthOptions(repo);
+  }
+  if (repo.authType === "basic") {
+    return createBasicGitAuthOptions(repo);
+  }
+  return { env: {}, cleanup: async () => {} };
+}
+
+async function createBasicGitAuthOptions(repo) {
+  if (!repo.username || !repo.password) {
+    throw new Error("Для аутентификации по логину и паролю/токену заполните оба поля.");
+  }
+
+  const scriptPath = path.join(os.tmpdir(), `git-askpass-${crypto.randomUUID()}${process.platform === "win32" ? ".cmd" : ".sh"}`);
+  const helperPath = process.platform === "win32" ? path.join(os.tmpdir(), `git-askpass-${crypto.randomUUID()}.js`) : "";
+  const script = process.platform === "win32"
+    ? `@echo off\r\nnode "${helperPath}" %*\r\n`
+    : "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s\\n' \"$GIT_REPOSITORY_USERNAME\" ;;\n  *) printf '%s\\n' \"$GIT_REPOSITORY_PASSWORD\" ;;\nesac\n";
+
+  if (helperPath) {
+    await fsp.writeFile(
+      helperPath,
+      "const prompt = process.argv.slice(2).join(' ');\nconst key = /username/i.test(prompt) ? 'GIT_REPOSITORY_USERNAME' : 'GIT_REPOSITORY_PASSWORD';\nprocess.stdout.write(`${process.env[key] || ''}\\n`);\n",
+      { encoding: "utf8", mode: 0o700 }
+    );
+  }
+  await fsp.writeFile(scriptPath, script, { encoding: "utf8", mode: 0o700 });
+  return {
+    env: {
+      GIT_ASKPASS: scriptPath,
+      GIT_REPOSITORY_USERNAME: repo.username,
+      GIT_REPOSITORY_PASSWORD: repo.password
+    },
+    cleanup: async () => {
+      await fsp.rm(scriptPath, { force: true });
+      if (helperPath) {
+        await fsp.rm(helperPath, { force: true });
+      }
+    }
+  };
+}
+
+async function createSshGitAuthOptions(repo) {
+  if (!repo.sshKey) {
+    throw new Error("Для SSH-аутентификации добавьте приватный ключ.");
+  }
+
+  const keyPath = path.join(os.tmpdir(), `git-ssh-key-${crypto.randomUUID()}`);
+  await fsp.writeFile(keyPath, normalizePrivateKey(repo.sshKey), { encoding: "utf8", mode: 0o600 });
+  return {
+    env: {
+      GIT_SSH_COMMAND: `ssh -i "${keyPath}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`
+    },
+    cleanup: async () => {
+      await fsp.rm(keyPath, { force: true });
+    }
+  };
+}
+
+function normalizePrivateKey(value) {
+  return String(value).replace(/\r?\n/g, "\n").trimEnd() + "\n";
+}
+
+function maskSensitiveText(text, secrets) {
+  return secrets.reduce((result, secret) => {
+    return secret ? result.split(secret).join("[secret]") : result;
+  }, String(text || ""));
 }
 
 function normalizeStringList(values) {
@@ -1128,9 +1370,12 @@ function buildRepositoryPrompt(repositories) {
     "Репозитории:",
     repositories.map((repo, index) => [
       `${index + 1}. Тип: ${repo.kind}`,
+      `   Режим: ${repo.mode || getRepositoryMode()}`,
+      repo.sourceUrl ? `   URL: ${repo.sourceUrl}` : "",
+      repo.branch ? `   Ветка: ${repo.branch}` : "",
       `   Путь: ${repo.path || "не указан"}`,
       `   Описание: ${repo.description || "не указано"}`
-    ].join("\n")).join("\n"),
+    ].filter(Boolean).join("\n")).join("\n"),
     "",
     "Сформируй краткую системную аналитику: назначение, ключевые сценарии, доменные сущности, зависимости, риски, пробелы.",
     buildClarityRubric()
