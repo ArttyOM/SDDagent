@@ -40,8 +40,11 @@
       },
       "gigacode": {
         "command": "gigacode",
-        "args": [],
-        "promptMode": "stdin",
+        "args": [
+          "--approval-mode=yolo",
+          "-p"
+        ],
+        "promptMode": "argument",
         "closeStdinAfterPrompt": true,
         "cwd": "."
       }
@@ -53,6 +56,7 @@
       "restApiVersion": "2",
       "authMode": "browser",
       "browserAuthUrl": "",
+      "browserAuthPath": "/",
       "authCheckPath": "/rest/api/2/myself",
       "issueFields": [
         "summary",
@@ -77,6 +81,7 @@
       "restBasePath": "/rest/api",
       "authMode": "browser",
       "browserAuthUrl": "",
+      "browserAuthPath": "/",
       "authCheckPath": "/rest/api/user/current",
       "certificate": {
         "pfxPath": "",
