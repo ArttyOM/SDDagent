@@ -35,7 +35,7 @@ chmod +x start.sh
 - `service.defaultBranch` задает ветку по умолчанию для глобального режима; если пользователь не указал ветку, используется `main`.
 - `service.repositoryCheckoutDirectory` задает каталог, куда сервер скачивает репозитории в глобальном режиме.
 - `integrations.jira.baseUrl` и `integrations.confluence.baseUrl` задают адреса систем.
-- `integrations.jira.authMode: "browser"` и `integrations.confluence.authMode: "browser"` включают браузерную аутентификацию: приложение открывает `browserAuthUrl`, а выбор клиентского сертификата показывает браузер/ОС.
+- `integrations.jira.authMode: "browser"` и `integrations.confluence.authMode: "browser"` включают браузерную аутентификацию: приложение открывает стабильную стартовую страницу `baseUrl` + `browserAuthPath`, а выбор клиентского сертификата показывает браузер/ОС. Готовые IdP-ссылки со `state` и `nonce` хранить не нужно: они динамические.
 - `certificate.pfxPath` или пара `certificate.certPath` + `certificate.keyPath` задают клиентский сертификат для серверной проверки, если для интеграции используется `authMode: "certificate"`.
 - `certificate.passphraseEnv` задает имя переменной окружения с паролем к сертификату для серверной проверки.
 - `outputDirectory` задает каталог, куда CLI должен сохранить markdown-аналитику.

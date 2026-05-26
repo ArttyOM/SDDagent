@@ -790,7 +790,7 @@ async function authenticate(service) {
       ok: false,
       status: "opened",
       checkedAt: new Date().toISOString(),
-      message: "Окно аутентификации открыто. Выберите сертификат в системном диалоге и завершите вход в браузере."
+      message: "Стартовая страница аутентификации открыта. Система сама сгенерирует OIDC state/nonce; выберите сертификат в системном диалоге и завершите вход в браузере."
     };
     authState[service] = state;
     return state;
@@ -836,14 +836,44 @@ function getIntegrationAuthMode(service, integration) {
   if (configuredMode) {
     return configuredMode;
   }
-  if (service === "jira" && getBrowserAuthUrl(integration)) {
+  if ((service === "jira" || service === "confluence") && getBrowserAuthUrl(integration)) {
     return "browser";
   }
   return "certificate";
 }
 
 function getBrowserAuthUrl(integration) {
-  return compact(integration?.browserAuthUrl || integration?.authUrl);
+  const configuredUrl = compact(integration?.browserAuthUrl || integration?.authUrl);
+  const stableUrl = getStableAuthEntryUrl(configuredUrl);
+  if (stableUrl) {
+    return stableUrl;
+  }
+
+  if (integration?.baseUrl) {
+    return new URL(compact(integration.browserAuthPath || integration.authStartPath || "/"), normalizeBaseUrl(integration.baseUrl)).toString();
+  }
+
+  return configuredUrl;
+}
+
+function getStableAuthEntryUrl(configuredUrl) {
+  if (!configuredUrl) {
+    return "";
+  }
+
+  try {
+    const url = new URL(configuredUrl);
+    const redirectUri = url.searchParams.get("redirect_uri");
+    const hasDynamicOidcState = url.searchParams.has("state") || url.searchParams.has("nonce");
+    if (redirectUri && hasDynamicOidcState) {
+      const redirectUrl = new URL(redirectUri);
+      return new URL("/", redirectUrl.origin).toString();
+    }
+  } catch {
+    return "";
+  }
+
+  return configuredUrl;
 }
 
 async function runJob(job, payload) {
